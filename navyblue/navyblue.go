@@ -163,6 +163,7 @@ func deploy(w http.ResponseWriter, r *http.Request, c appengine.Context, u *user
  */
 func doDeploy(w http.ResponseWriter, r *http.Request) {
 	c := appengine.NewContext(r)
+	u := user.Current(c)
 
 	// フォーム入力内容の取得
 	wsx, _ := strconv.Atoi(r.FormValue("warship_x"))
@@ -172,47 +173,21 @@ func doDeploy(w http.ResponseWriter, r *http.Request) {
 	smx, _ := strconv.Atoi(r.FormValue("submarine_x"))
 	smy, _ := strconv.Atoi(r.FormValue("submarine_y"))
 
-	g := new(Game)
-	g.getFromStore(c)
-	u := user.Current(c)
-
-	p, _ := g.getPlayer(u)
-	if p == nil {
-		fmt.Fprintf(w, "ゲームに参加してないよ!")
-		return
-	}
-
 	// 指定された座標がかぶっていないかチェック
 	if check_duplicate(wsx, wsy, crx, cry, smx, smy) {
 		fmt.Fprintf(w, "戦艦の位置が重複しています。戻って修正してください。")
 		return
 	}
 
-	// 指定された座標をセット
-	p.Warship.PX = wsx
-	p.Warship.PY = wsy
-	p.Cruiser.PX = crx
-	p.Cruiser.PY = cry
-	p.Submarine.PX = smx
-	p.Submarine.PY = smy
-
-	// 準備ができたことにする
-	p.State = PST_READY
-
-	// プレイヤーのどちらもREADYになったら、ゲーム開始ステートへ
-	if g.Player1.State == PST_READY && g.Player2.State == PST_READY {
-		g.State = Turn1
-		g.GMessage = "開戦！！"
-	}
-
-	if err := g.putToStore(c); err != nil {
+	g := new(Game)
+	err := g.setDeployData(&c, u, wsx, wsy, crx, cry, smx, smy)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	http.Redirect(w, r, "/", http.StatusFound)
 	return
-	fmt.Fprintf(w, "見せられないよ！")
+
 }
 
 // プレイヤーの攻撃ターン
@@ -231,68 +206,22 @@ func battle1(w http.ResponseWriter, r *http.Request, c appengine.Context, u *use
 	// ユーザに応じた盤面の表示
 	if err := BattleHTMLTemplate.Execute(w, sg); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 }
 
 // 攻撃実行
 func doAttack(w http.ResponseWriter, r *http.Request) {
 	c := appengine.NewContext(r)
-	g := new(Game)
-	g.getFromStore(c)
 	u := user.Current(c)
 
+	// フォームの情報を取得
 	atx, _ := strconv.Atoi(r.FormValue("attack_x"))
 	aty, _ := strconv.Atoi(r.FormValue("attack_y"))
 
-	// ログインユーザから自軍、敵軍データを取得
-	fri, enm := g.getPlayer(u)
-	if fri == nil {
-		fmt.Fprintf(w, "ゲームに参加してないよ！")
-		return
-	}
-
-	// 指定した箇所が攻撃可能かどうか判定
-	if fri.checkAttackable(atx, aty) == 0 {
-		// 攻撃不可なら戻る
-		fri.Message = "そこは攻撃できる地点ではありません"
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
-	}
-
-	fri.Message = ""
-
-	ret, _ := enm.Attacked(atx, aty)
-	pstr := conv_point2str(atx, aty)
-	switch ret {
-	case ATTACK_SUCCESS_SUNK:
-		g.GMessage = fri.Name + "が" + pstr + "を攻撃！" + ">>>>" + "撃沈！！！"
-	case ATTACK_SUCCESS_DAMAGE:
-		g.GMessage = fri.Name + "が" + pstr + "を攻撃！" + ">>>>" + "命中！！"
-	case ATTACK_FAIL_NEAR:
-		g.GMessage = fri.Name + "が" + pstr + "を攻撃！" + ">>>>" + "波高し！"
-	case ATTACK_FAIL_FAR:
-		g.GMessage = fri.Name + "が" + pstr + "を攻撃！" + ">>>>" + "ミス"
-	default:
-		fmt.Fprintf(w, "player.Attacked()の内部エラー")
-		return
-	}
-
-	// すべての艦が撃沈したら終了
-	if enm.checkSunked() {
-		g.Winner = *fri
-		g.State = Finish
-	} else {
-		if g.State == Turn1 {
-			g.State = Turn2
-		} else if g.State == Turn2 {
-			g.State = Turn1
-		} else {
-			fmt.Fprintf(w, "ステート不正")
-			return
-		}
-	}
-
-	if err := g.putToStore(c); err != nil {
+	g := new(Game)
+	err := g.doAttack(&c, u, atx, aty)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -303,60 +232,16 @@ func doAttack(w http.ResponseWriter, r *http.Request) {
 // 移動
 func doMove(w http.ResponseWriter, r *http.Request) {
 	c := appengine.NewContext(r)
-	g := new(Game)
-	g.getFromStore(c)
 	u := user.Current(c)
 
-	// ログインユーザから自軍、敵軍データを取得
-	fri, _ := g.getPlayer(u)
-	if fri == nil {
-		fmt.Fprintf(w, "ゲームに参加してないよ！")
-		return
-	}
-
-	// 移動する船のタイプ、方向、マスを取得
-	var s *Ship
-	var s_str string
-	switch ret, _ := strconv.Atoi(r.FormValue("shiptype")); ret {
-	case 0:
-		s = &fri.Warship
-		s_str = "戦艦"
-	case 1:
-		s = &fri.Cruiser
-		s_str = "駆逐艦"
-	case 2:
-		s = &fri.Submarine
-		s_str = "潜水艦"
-	default:
-		fmt.Fprintf(w, "CGIのデータをうまく取得できてないよ")
-		return
-	}
+	// フォーム入力の取得
+	stype, _ := strconv.Atoi(r.FormValue("shiptype"))
 	way, _ := strconv.Atoi(r.FormValue("way"))
 	cell, _ := strconv.Atoi(r.FormValue("cell"))
-	// 船の移動
-	switch fri.moveShip(s, way, cell) {
-	case MOVE_FAIL_SUNKEN:
-		fri.Message = "移動しようとした船はすでに沈没しています"
-	case MOVE_FAIL_AREA_OVER:
-		fri.Message = "エリアをはみ出してしまうので移動できません"
-	case MOVE_FAIL_DUPLICATE:
-		fri.Message = "他の味方艦のいる場所へは移動できません"
-	case MOVE_FAIL_INTERNAL:
-		fmt.Fprintf(w, "p.moveShip()の内部エラー")
-	case MOVE_SUCCESS:
-		fri.Message = ""
-		g.GMessage = fri.Name + "の" + s_str + "が" + conv_way2str(way) + "へ" + strconv.Itoa(cell) + "移動！"
-		if g.State == Turn1 {
-			g.State = Turn2
-		} else if g.State == Turn2 {
-			g.State = Turn1
-		} else {
-			fmt.Fprintf(w, "ステート不正")
-			return
-		}
-	}
 
-	if err := g.putToStore(c); err != nil {
+	g := new(Game)
+	err := g.doMove(&c, u, stype, way, cell)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -364,6 +249,7 @@ func doMove(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
+// ゲーム終了
 func finish(w http.ResponseWriter, r *http.Request, c appengine.Context, u *user.User, g *Game) {
 
 	sg := new(ShowGame)
