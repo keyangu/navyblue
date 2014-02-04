@@ -1,15 +1,11 @@
 package navyblue
 
-// TODO Trunsaction と ancestor クエリを使わないとまずそう
-
 import (
 	"appengine"
-	//    "appengine/datastore"
 	"appengine/user"
+	"fmt"
 	"html/template"
 	"net/http"
-	//  "time"
-	"fmt"
 	"strconv"
 )
 
@@ -33,22 +29,6 @@ func init() {
 func navyhandler(w http.ResponseWriter, r *http.Request) {
 	c := appengine.NewContext(r)
 	u := user.Current(c)
-
-	/*
-		   app.yaml に login:required を書いたので、自分でログイン処理を
-		   書く必要がない
-		// ユーザがnil(ログインしていない)
-		if u == nil {
-			url, err := user.LoginURL(c, r.URL.String())
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("Location", url)
-			w.WriteHeader(http.StatusFound)
-			return
-		}
-	*/
 
 	// ゲームの状態をデータストアから取得
 	g := new(Game)
@@ -108,28 +88,6 @@ func doRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	/*
-		g.getFromStore(c)
-
-		if g.Player1.User == *u {
-			// 同じアカウントなので重複登録させない
-			fmt.Fprintf(w, "すでに登録してるよ！")
-			return
-		}
-		if g.Player1.Name != "" {
-			p.Ptype = Player2
-			g.Player2 = p
-			g.State = Deploy
-		} else {
-			g.Player1 = p
-		}
-
-		if err := g.putToStore(c); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	*/
-
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -137,9 +95,6 @@ func doRegister(w http.ResponseWriter, r *http.Request) {
  * 配置画面
  */
 func deploy(w http.ResponseWriter, r *http.Request, c appengine.Context, u *user.User, g *Game) {
-
-	//fmt.Fprintf(w, "%v", g)
-	//return
 
 	// ログイン情報からプレイヤー情報を取得
 	p, _ := g.getPlayer(u)
@@ -275,38 +230,6 @@ func reset(w http.ResponseWriter, r *http.Request) {
 	g.deleteStore(c)
 
 	http.Redirect(w, r, "/", http.StatusFound)
-}
-
-func conv_way2str(way int) string {
-	switch way {
-	case 0:
-		return "北"
-	case 1:
-		return "東"
-	case 2:
-		return "南"
-	case 3:
-		return "西"
-	default:
-		return ""
-	}
-}
-
-func conv_point2str(x, y int) string {
-	var ret string
-	switch x {
-	case 0:
-		ret = "A-"
-	case 1:
-		ret = "B-"
-	case 2:
-		ret = "C-"
-	case 3:
-		ret = "D-"
-	case 4:
-		ret = "E-"
-	}
-	return ret + strconv.Itoa(y+1)
 }
 
 // 指定した座標が重複しているかどうかチェック

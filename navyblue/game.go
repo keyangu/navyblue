@@ -238,3 +238,35 @@ func (g *Game) doMove(c *appengine.Context, u *user.User, stype, dir, dist int) 
 	}, nil)
 	return err
 }
+
+func conv_way2str(way int) string {
+	switch way {
+	case 0:
+		return "北"
+	case 1:
+		return "東"
+	case 2:
+		return "南"
+	case 3:
+		return "西"
+	default:
+		return ""
+	}
+}
+
+func conv_point2str(x, y int) string {
+	var ret string
+	switch x {
+	case 0:
+		ret = "A-"
+	case 1:
+		ret = "B-"
+	case 2:
+		ret = "C-"
+	case 3:
+		ret = "D-"
+	case 4:
+		ret = "E-"
+	}
+	return ret + strconv.Itoa(y+1)
+}
