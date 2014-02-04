@@ -1,0 +1,21 @@
+<html>
+	<body>
+	<h1>Player登録</h1>
+	{{if .Friend}}
+	<p>ようこそ、{{.Friend.Name}}さん。</p>
+	<p>対戦相手が登録するまでお待ちください。</p>
+	<p><a href=".">更新</a></p>
+	{{else}}
+	<form action="/doRegister" method="post">
+		<div>名前：<input name="name" type="text" /><input type="submit" value="参加" /></div>
+	</form>
+	{{end}}
+<!--
+	<hr />
+	<p>debug</p>
+	{{.}}
+	<hr />
+-->
+	</body>
+</html>
+

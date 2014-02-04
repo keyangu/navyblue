@@ -3,15 +3,20 @@ package navyblue
 // TODO Trunsaction と ancestor クエリを使わないとまずそう
 
 import (
-    "appengine"
-//    "appengine/datastore"
-    "appengine/user"
- //   "html/template"
-    "net/http"
-  //  "time"
+	"appengine"
+	//    "appengine/datastore"
+	"appengine/user"
+	"html/template"
+	"net/http"
+	//  "time"
 	"fmt"
 	"strconv"
 )
+
+var RegisterHTMLTemplate = template.Must(template.ParseFiles("register.html"))
+var DeployHTMLTemplate = template.Must(template.ParseFiles("deploy.html"))
+var BattleHTMLTemplate = template.Must(template.ParseFiles("battle.html"))
+var FinishHTMLTemplate = template.Must(template.ParseFiles("finish.html"))
 
 func init() {
 	http.HandleFunc("/doRegister", doRegister)
@@ -28,17 +33,22 @@ func init() {
 func navyhandler(w http.ResponseWriter, r *http.Request) {
 	c := appengine.NewContext(r)
 	u := user.Current(c)
-	// ユーザがnil(ログインしていない)
-	if u == nil {
-		url, err := user.LoginURL(c, r.URL.String())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+
+	/*
+		   app.yaml に login:required を書いたので、自分でログイン処理を
+		   書く必要がない
+		// ユーザがnil(ログインしていない)
+		if u == nil {
+			url, err := user.LoginURL(c, r.URL.String())
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Location", url)
+			w.WriteHeader(http.StatusFound)
 			return
 		}
-		w.Header().Set("Location", url)
-		w.WriteHeader(http.StatusFound)
-		return
-	}
+	*/
 
 	// ゲームの状態をデータストアから取得
 	g := new(Game)
@@ -74,9 +84,6 @@ func doRegister(w http.ResponseWriter, r *http.Request) {
 	c := appengine.NewContext(r)
 	u := user.Current(c)
 
-	g := new(Game)
-	g.getFromStore(c)
-
 	if r.FormValue("name") == "" {
 		fmt.Fprintf(w, "なんか入力してね！")
 		return
@@ -84,9 +91,9 @@ func doRegister(w http.ResponseWriter, r *http.Request) {
 
 	// 名前からプレイヤーオブジェクトを生成
 	p := Player{
-		User:		*u,
-		Name:		r.FormValue("name"),
-		Ptype:		Player1,
+		User:  *u,
+		Name:  r.FormValue("name"),
+		Ptype: Player1,
 	}
 	p.Warship = *new(Ship)
 	p.Warship.SetDefaultWarship()
@@ -95,30 +102,33 @@ func doRegister(w http.ResponseWriter, r *http.Request) {
 	p.Submarine = *new(Ship)
 	p.Submarine.SetDefaultSubmarine()
 
-	if g.Player1.User == *u {
-		// 同じアカウントなので重複登録させない
-		fmt.Fprintf(w, "すでに登録してるよ！")
+	g := new(Game)
+	if err := g.setNewPlayer(&c, &p); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if g.Player1.Name != "" {
-		p.Ptype = Player2
-		g.Player2 = p
-		g.State = Deploy
-	} else {
-		g.Player1 = p
-	}
-
-	err := g.putToStore(c, w)
 
 	/*
-	if err := DebugHTMLTemplate.Execute(w, err); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+		g.getFromStore(c)
+
+		if g.Player1.User == *u {
+			// 同じアカウントなので重複登録させない
+			fmt.Fprintf(w, "すでに登録してるよ！")
+			return
+		}
+		if g.Player1.Name != "" {
+			p.Ptype = Player2
+			g.Player2 = p
+			g.State = Deploy
+		} else {
+			g.Player1 = p
+		}
+
+		if err := g.putToStore(c); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	*/
-	if err != 0 {
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
-	}
 
 	http.Redirect(w, r, "/", http.StatusFound)
 }
@@ -195,11 +205,10 @@ func doDeploy(w http.ResponseWriter, r *http.Request) {
 		g.GMessage = "開戦！！"
 	}
 
-	if err := g.putToStore(c, w); err != 0 {
-		fmt.Fprintf(w, "データの保存に失敗しますた")
+	if err := g.putToStore(c); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 
 	http.Redirect(w, r, "/", http.StatusFound)
 	return
@@ -246,7 +255,6 @@ func doAttack(w http.ResponseWriter, r *http.Request) {
 	if fri.checkAttackable(atx, aty) == 0 {
 		// 攻撃不可なら戻る
 		fri.Message = "そこは攻撃できる地点ではありません"
-		g.putToStore(c, w)
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
@@ -284,8 +292,8 @@ func doAttack(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := g.putToStore(c, w); err != 0 {
-		fmt.Fprintf(w, "データの保存に失敗しますた")
+	if err := g.putToStore(c); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -348,8 +356,8 @@ func doMove(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := g.putToStore(c, w); err != 0 {
-		fmt.Fprintf(w, "データの保存に失敗しますた")
+	if err := g.putToStore(c); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -385,24 +393,34 @@ func reset(w http.ResponseWriter, r *http.Request) {
 
 func conv_way2str(way int) string {
 	switch way {
-	case 0: return "北"
-	case 1: return "東"
-	case 2: return "南"
-	case 3: return "西"
-	default: return ""
+	case 0:
+		return "北"
+	case 1:
+		return "東"
+	case 2:
+		return "南"
+	case 3:
+		return "西"
+	default:
+		return ""
 	}
 }
 
 func conv_point2str(x, y int) string {
 	var ret string
 	switch x {
-	case 0: ret = "A-"
-	case 1: ret = "B-"
-	case 2: ret = "C-"
-	case 3: ret = "D-"
-	case 4: ret = "E-"
+	case 0:
+		ret = "A-"
+	case 1:
+		ret = "B-"
+	case 2:
+		ret = "C-"
+	case 3:
+		ret = "D-"
+	case 4:
+		ret = "E-"
 	}
-	return ret + strconv.Itoa(y + 1)
+	return ret + strconv.Itoa(y+1)
 }
 
 // 指定した座標が重複しているかどうかチェック
@@ -421,4 +439,3 @@ func check_duplicate(wsx, wsy, crx, cry, smx, smy int) bool {
 
 	return false
 }
-

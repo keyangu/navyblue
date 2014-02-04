@@ -3,8 +3,8 @@ package navyblue
 import (
 	"appengine"
 	"appengine/datastore"
-	"net/http"
 	"appengine/user"
+	"errors"
 )
 
 // アプリステート
@@ -20,11 +20,11 @@ const gameKeyStrID = "12345678"
 
 // ゲームの状態(DataStore保存用)
 type Game struct {
-	State		int
-	Player1		Player
-	Player2		Player
-	Winner		Player
-	GMessage	string
+	State    int
+	Player1  Player
+	Player2  Player
+	Winner   Player
+	GMessage string
 }
 
 // ゲームデータを取得
@@ -36,14 +36,10 @@ func (g *Game) getFromStore(c appengine.Context) *Game {
 }
 
 // ゲームデータをDataStoreに保存
-func (g *Game) putToStore(c appengine.Context, w http.ResponseWriter) int {
+func (g *Game) putToStore(c appengine.Context) error {
 	g.deleteStore(c)
 	_, err := datastore.Put(c, datastore.NewKey(c, "Game", gameKeyStrID, 0, nil), g)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return -1
-	}
-	return 0
+	return err
 }
 
 // ゲームデータをDataStoreから削除
@@ -65,3 +61,22 @@ func (g *Game) getPlayer(u *user.User) (*Player, *Player) {
 	}
 }
 
+func (g *Game) setNewPlayer(c *appengine.Context, p *Player) error {
+	err := datastore.RunInTransaction(*c, func(c appengine.Context) error {
+		g.getFromStore(c)
+		if g.Player1.User == p.User {
+			return errors.New("すでに登録してるよ！")
+		}
+		if g.Player1.Name != "" {
+			p.Ptype = Player2
+			g.Player2 = *p
+			g.State = Deploy
+		} else {
+			g.Player1 = *p
+		}
+		err := g.putToStore(c)
+		return err
+	}, nil)
+
+	return err
+}
